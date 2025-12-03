@@ -1,8 +1,5 @@
 # AI Weather Features & 7-Day Forecast
 
-## Overview
-
-We've added intelligent AI-powered suggestions and a beautiful 7-day weather forecast with an Apple Weather app-style design to the Climexa platform.
 
 ## Features Added
 
@@ -36,7 +33,6 @@ The AI service analyzes:
 **Location**: `frontend/src/components/WeatherForecast.jsx`
 
 **Features**:
-- **Apple Weather App Design** - Beautiful gradient cards with rounded corners
 - **Current Weather Display** - Large temperature, conditions, wind, rain, humidity
 - **7-Day Forecast** - Daily high/low temps, weather icons, precipitation, wind
 - **Weather Icons** - Emoji-based icons matching WMO weather codes
@@ -66,7 +62,6 @@ The AI service analyzes:
 
 ### WeatherForecast Component
 - **File**: `frontend/src/components/WeatherForecast.jsx`
-- **Design**: Apple Weather app-inspired with gradient backgrounds
 - **Features**:
   - Large current temperature display
   - Weather condition icons
@@ -126,8 +121,6 @@ Both components are integrated into the **Farmer Dashboard**:
 4. Auto-refresh every 30 seconds
 
 ## Design Philosophy
-
-- **Apple Weather Style**: Clean, minimal, gradient backgrounds
 - **Color-Coded Suggestions**: Visual priority indicators
 - **Responsive Design**: Works on all screen sizes
 - **Smooth Animations**: Hover effects and transitions
