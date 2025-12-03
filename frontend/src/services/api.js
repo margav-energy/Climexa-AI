@@ -54,7 +54,7 @@ export const farmerAPI = {
   getFarm: (id) => api.get(`/farmer/farms/${id}/`),
   getFarmStatus: (id) => api.get(`/farmer/farms/${id}/status/`),
   getFarmDashboard: (id) => api.get(`/farmer/farms/${id}/dashboard/`),
-  getSensors: (farmId) => api.get(`/sensors/sensors/?farm_id=${farmId}`),
+  getSensors: (farmId) => api.get(`/sensors/sensors/by_farm/?farm_id=${farmId}`),
   getSensorReadings: (sensorId, hours = 24) => 
     api.get(`/sensors/sensors/${sensorId}/readings/?hours=${hours}`),
 }

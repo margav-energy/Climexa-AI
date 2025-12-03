@@ -202,7 +202,7 @@ export default function FarmerDashboard() {
         </div>
 
         {/* Status Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
           {/* Battery Status */}
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow">
             <div className="flex items-center justify-between mb-4">
@@ -304,6 +304,46 @@ export default function FarmerDashboard() {
                 </div>
               )}
             </div>
+          </div>
+
+          {/* Average Soil Moisture */}
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Soil Moisture</h3>
+              <div className="p-2 bg-amber-50 rounded-lg">
+                <Droplet className={`w-5 h-5 ${
+                  (dashboardData?.average_soil_moisture || 0) < 30 ? 'text-red-500' :
+                  (dashboardData?.average_soil_moisture || 0) < 50 ? 'text-yellow-500' :
+                  'text-green-500'
+                }`} />
+              </div>
+            </div>
+            <div className="flex items-baseline mb-2">
+              <span className={`text-4xl font-bold ${
+                (dashboardData?.average_soil_moisture || 0) < 30 ? 'text-red-600' :
+                (dashboardData?.average_soil_moisture || 0) < 50 ? 'text-yellow-600' :
+                'text-green-600'
+              }`}>
+                {dashboardData?.average_soil_moisture !== null && dashboardData?.average_soil_moisture !== undefined 
+                  ? dashboardData.average_soil_moisture.toFixed(1)
+                  : status?.current_soil_moisture?.toFixed(1) || 'N/A'}
+              </span>
+              <span className="text-lg text-gray-500 ml-1">%</span>
+            </div>
+            <p className="text-xs text-gray-500 font-medium">
+              Average from all sensors (300cm depth)
+              {dashboardData?.average_soil_moisture !== null && dashboardData?.average_soil_moisture !== undefined && (
+                <span className={`ml-2 ${
+                  dashboardData.average_soil_moisture < 30 ? 'text-red-600' :
+                  dashboardData.average_soil_moisture < 50 ? 'text-yellow-600' :
+                  'text-green-600'
+                }`}>
+                  {dashboardData.average_soil_moisture < 30 ? 'Critical' :
+                   dashboardData.average_soil_moisture < 50 ? 'Low' :
+                   'Optimal'}
+                </span>
+              )}
+            </p>
           </div>
         </div>
 

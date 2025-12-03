@@ -45,18 +45,23 @@ class FarmViewSet(viewsets.ModelViewSet):
         status_obj, created = SystemStatus.objects.get_or_create(farm=farm)
         
         # Import here to avoid circular imports
-        from sensors.models import SensorReading
+        from sensors.models import SensorReading, Sensor, SensorType
         from sensors.serializers import SensorReadingSerializer
+        from automation.services import get_current_soil_moisture
         
         # Get latest sensor readings
         latest_readings = SensorReading.objects.filter(
             sensor__farm=farm
         ).order_by('-timestamp')[:10]
         
+        # Calculate average soil moisture from all soil moisture sensors
+        avg_soil_moisture = get_current_soil_moisture(farm)
+        
         data = {
             'farm': FarmSerializer(farm).data,
             'status': SystemStatusSerializer(status_obj).data,
-            'recent_sensor_readings': SensorReadingSerializer(latest_readings, many=True).data
+            'recent_sensor_readings': SensorReadingSerializer(latest_readings, many=True).data,
+            'average_soil_moisture': float(avg_soil_moisture) if avg_soil_moisture is not None else None
         }
         
         return Response(data)

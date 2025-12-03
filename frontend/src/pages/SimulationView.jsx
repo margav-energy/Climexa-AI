@@ -13,40 +13,172 @@ import {
   Play,
   Pause,
   RotateCcw,
-  Gauge
+  Gauge,
+  Waves,
+  Droplets,
+  Wind,
+  GaugeCircle
 } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 
-// Simulate farm system running in real-time with soil moisture-based logic
-const simulateHour = (currentData, hour) => {
-  // Simulate solar curve (peak at noon, 0 at night)
+// Simulate farm system running in real-time with Open-Meteo weather data
+const simulateHour = (currentData, hour, weatherForecast = null, startTime = null) => {
   const hourOfDay = hour % 24
-  const solarIntensity = Math.max(0, Math.sin((hourOfDay - 6) * Math.PI / 12) * 1000)
   
-  // Simulate GTI based on time of day with reduced randomness for more consistent charging
-  // Reduce randomness during peak hours to ensure better charging
+  // Use real weather data from Open-Meteo if available, otherwise fall back to simulated
+  let gti, temperature, clouds, rain
+  let soilMoistureFromAPI = null
+  let soilTemperatureFromAPI = null
+  
+  if (weatherForecast && weatherForecast.hourly) {
+    const hourly = weatherForecast.hourly
+    
+    // Get values from forecast, safely handling missing data
+    const gtiValues = hourly.global_tilted_irradiance || []
+    const tempValues = hourly.temperature_2m || []
+    const cloudValues = hourly.cloud_cover || []
+    const rainValues = hourly.precipitation || []
+    const times = hourly.time || []
+    
+    // Soil data from Open-Meteo
+    const soilMoisture0to1cm = hourly.soil_moisture_0_1cm || []
+    const soilMoisture1to3cm = hourly.soil_moisture_1_3cm || []
+    const soilMoisture3to9cm = hourly.soil_moisture_3_9cm || []
+    const soilTemperature6cm = hourly.soil_temperature_6cm || []
+    
+    // Calculate the index based on simulation start time and current hour
+    let index = 0
+    
+    if (startTime && times.length > 0) {
+      // Find the index for the current simulated time
+      const simulatedTime = new Date(startTime.getTime() + hour * 3600000) // Add hours to start time
+      const simulatedTimeStr = simulatedTime.toISOString().slice(0, 13) + ':00' // Format: YYYY-MM-DDTHH:00
+      
+      // Try to find exact match in times array
+      const exactIndex = times.findIndex(time => {
+        // Format the time from forecast to match
+        const forecastTimeStr = time.slice(0, 13) + ':00'
+        return forecastTimeStr === simulatedTimeStr
+      })
+      
+      if (exactIndex >= 0) {
+        index = exactIndex
+      } else {
+        // Fallback: calculate hours difference from start
+        // Open-Meteo typically starts from current hour (index 0 = now)
+        // So we use hour directly as index offset from start
+        const startTimeStr = startTime.toISOString().slice(0, 13) + ':00'
+        const startIndex = times.findIndex(time => {
+          const forecastTimeStr = time.slice(0, 13) + ':00'
+          return forecastTimeStr === startTimeStr
+        })
+        
+        if (startIndex >= 0) {
+          index = Math.min(startIndex + hour, times.length - 1)
+        } else {
+          // Ultimate fallback: use hour as offset from beginning
+          index = Math.min(hour, times.length - 1)
+        }
+      }
+    } else {
+      // No start time, use hour as direct index
+      const maxIndex = Math.max(
+        gtiValues.length - 1,
+        tempValues.length - 1,
+        cloudValues.length - 1,
+        rainValues.length - 1,
+        0
+      )
+      index = Math.min(hour, maxIndex)
+    }
+    
+    // Ensure index is valid
+    index = Math.max(0, Math.min(index, Math.max(gtiValues.length - 1, tempValues.length - 1, cloudValues.length - 1, rainValues.length - 1, 0)))
+    
+    // Get values from forecast, with fallbacks
+    gti = (gtiValues[index] !== undefined && gtiValues[index] !== null && !isNaN(gtiValues[index])) 
+      ? parseFloat(gtiValues[index]) 
+      : ((gtiValues.length > 0 && gtiValues[0] !== null && !isNaN(gtiValues[0])) ? parseFloat(gtiValues[0]) : 0)
+    
+    temperature = (tempValues[index] !== undefined && tempValues[index] !== null && !isNaN(tempValues[index])) 
+      ? parseFloat(tempValues[index]) 
+      : ((tempValues.length > 0 && tempValues[0] !== null && !isNaN(tempValues[0])) ? parseFloat(tempValues[0]) : 20)
+    
+    clouds = (cloudValues[index] !== undefined && cloudValues[index] !== null && !isNaN(cloudValues[index])) 
+      ? parseFloat(cloudValues[index]) 
+      : ((cloudValues.length > 0 && cloudValues[0] !== null && !isNaN(cloudValues[0])) ? parseFloat(cloudValues[0]) : 0)
+    
+    rain = (rainValues[index] !== undefined && rainValues[index] !== null && !isNaN(rainValues[index])) 
+      ? parseFloat(rainValues[index]) 
+      : ((rainValues.length > 0 && rainValues[0] !== null && !isNaN(rainValues[0])) ? parseFloat(rainValues[0]) : 0)
+    
+    // Get soil data from Open-Meteo (convert from m³/m³ to percentage for moisture)
+    // Use the 3-9cm depth directly (closest to our 300cm sensors)
+    const soilMoisture3to9 = (soilMoisture3to9cm[index] !== undefined && soilMoisture3to9cm[index] !== null && !isNaN(soilMoisture3to9cm[index])) 
+      ? parseFloat(soilMoisture3to9cm[index]) : null
+    
+    // Use 3-9cm depth directly, or fallback to 1-3cm, then 0-1cm
+    if (soilMoisture3to9 !== null) {
+      // Convert m³/m³ to percentage (multiply by 100)
+      soilMoistureFromAPI = Math.min(100, Math.max(0, soilMoisture3to9 * 100))
+    } else {
+      // Fallback to 1-3cm depth
+      const soilMoisture1to3 = (soilMoisture1to3cm[index] !== undefined && soilMoisture1to3cm[index] !== null && !isNaN(soilMoisture1to3cm[index])) 
+        ? parseFloat(soilMoisture1to3cm[index]) : null
+      if (soilMoisture1to3 !== null) {
+        soilMoistureFromAPI = Math.min(100, Math.max(0, soilMoisture1to3 * 100))
+      } else {
+        // Final fallback to 0-1cm depth
+        const soilMoisture0to1 = (soilMoisture0to1cm[index] !== undefined && soilMoisture0to1cm[index] !== null && !isNaN(soilMoisture0to1cm[index])) 
+          ? parseFloat(soilMoisture0to1cm[index]) : null
+        if (soilMoisture0to1 !== null) {
+          soilMoistureFromAPI = Math.min(100, Math.max(0, soilMoisture0to1 * 100))
+        }
+      }
+    }
+    
+    // Get soil temperature
+    if (soilTemperature6cm[index] !== undefined && soilTemperature6cm[index] !== null && !isNaN(soilTemperature6cm[index])) {
+      soilTemperatureFromAPI = parseFloat(soilTemperature6cm[index])
+    }
+    
+    // Ensure GTI is not negative
+    gti = Math.max(0, gti || 0)
+    
+    // Log for debugging
+    if (hour === 0 || hour % 24 === 0) {
+      console.log(`[Simulation Hour ${hour}] Using Open-Meteo data - Index: ${index}, GTI: ${gti} W/m², Temp: ${temperature}°C, Soil Moisture: ${soilMoistureFromAPI !== null ? soilMoistureFromAPI.toFixed(1) + '%' : 'N/A'}, Soil Temp: ${soilTemperatureFromAPI !== null ? soilTemperatureFromAPI.toFixed(1) + '°C' : 'N/A'}`)
+    }
+  } else {
+    // Fallback to simulated data if forecast not available
+    const solarIntensity = Math.max(0, Math.sin((hourOfDay - 6) * Math.PI / 12) * 1000)
   const baseGTI = solarIntensity
-  const randomness = hourOfDay >= 10 && hourOfDay <= 15 ? 50 : 100 // Less randomness at peak
-  const gti = Math.max(0, baseGTI + (Math.random() * randomness * 2 - randomness))
+    const randomness = hourOfDay >= 10 && hourOfDay <= 15 ? 50 : 100
+    gti = Math.max(0, baseGTI + (Math.random() * randomness * 2 - randomness))
+    
+  const baseTemp = 20 + (hourOfDay > 6 && hourOfDay < 18 ? 10 : 0)
+    temperature = baseTemp + (Math.random() * 5 - 2.5)
   
-  // Calculate PV output
+    clouds = hourOfDay > 10 && hourOfDay < 14 ? 
+    Math.random() * 30 : Math.random() * 80
+  
+    rain = Math.random() > 0.9 ? Math.random() * 5 : 0
+  }
+  
+  // Calculate PV output from GTI
   const systemSizeKw = currentData.systemSizeKw || 130
   const panelEfficiency = currentData.panelEfficiency || 0.18
   const pvOutput = (gti * panelEfficiency * systemSizeKw) / 1000
   
-  // Simulate temperature (warmer during day)
-  const baseTemp = 20 + (hourOfDay > 6 && hourOfDay < 18 ? 10 : 0)
-  const temperature = baseTemp + (Math.random() * 5 - 2.5)
-  
-  // Simulate clouds (less during peak sun)
-  const clouds = hourOfDay > 10 && hourOfDay < 14 ? 
-    Math.random() * 30 : Math.random() * 80
-  
-  // Simulate rain (occasional)
-  const rain = Math.random() > 0.9 ? Math.random() * 5 : 0
-  
-  // Simulate soil moisture (decreases over time if no irrigation, increases with rain/irrigation)
+  // Use soil moisture directly from Open-Meteo if available, otherwise simulate
   let soilMoisture = currentData.soilMoisture || 50
+  
+  // If we have soil moisture from Open-Meteo API, use it directly without averaging
+  if (typeof soilMoistureFromAPI === 'number' && !isNaN(soilMoistureFromAPI)) {
+    // Use Open-Meteo data directly - no adjustments needed
+    soilMoisture = soilMoistureFromAPI
+  } else {
+    // Fallback to simulated soil moisture if API data not available
   if (rain > 0.5) {
     soilMoisture = Math.min(100, soilMoisture + rain * 2) // Rain increases moisture
   } else {
@@ -61,6 +193,7 @@ const simulateHour = (currentData, hour) => {
       // Natural decrease varies by temperature and time of day
       const decreaseRate = 0.5 + (temperature > 25 ? 1 : 0) + (hourOfDay >= 10 && hourOfDay <= 15 ? 0.5 : 0)
       soilMoisture = Math.max(0, soilMoisture - decreaseRate)
+      }
     }
   }
   
@@ -212,6 +345,7 @@ const simulateHour = (currentData, hour) => {
     clouds: Math.round(clouds),
     rain: Math.round(rain * 10) / 10,
     soilMoisture: Math.round(soilMoisture * 10) / 10,
+    soilTemperature: soilTemperatureFromAPI !== null ? Math.round(soilTemperatureFromAPI * 10) / 10 : null,
     batteryLevel: Math.round(actualBatteryLevel * 10) / 10,
     batteryKwh: Math.round(actualBatteryKwh * 10) / 10,
     lastIrrigationOn: irrigationOn, // Store for next iteration
@@ -224,7 +358,7 @@ const simulateHour = (currentData, hour) => {
     priority,
     netPower: Math.round(netPower * 100) / 100,
     isPeakSolar,
-    timestamp: new Date(Date.now() + hour * 3600000).toISOString()
+    timestamp: startTime ? new Date(startTime.getTime() + hour * 3600000).toISOString() : new Date(Date.now() + hour * 3600000).toISOString()
   }
 }
 
@@ -238,6 +372,10 @@ export default function SimulationView() {
   const [speed, setSpeed] = useState(1) // 1x, 2x, 5x speed
   const [currentHour, setCurrentHour] = useState(0)
   const [history, setHistory] = useState([])
+  const [sensors, setSensors] = useState([])
+  const [weatherForecast, setWeatherForecast] = useState(null)
+  const [simulationStartTime, setSimulationStartTime] = useState(null)
+  const [dashboardData, setDashboardData] = useState(null)
   const intervalRef = useRef(null)
 
   useEffect(() => {
@@ -247,6 +385,7 @@ export default function SimulationView() {
   useEffect(() => {
     if (selectedFarm) {
       loadFarmData()
+      loadSensors()
     }
   }, [selectedFarm])
 
@@ -265,7 +404,7 @@ export default function SimulationView() {
         clearInterval(intervalRef.current)
       }
     }
-  }, [isRunning, speed, selectedFarm, simulationData])
+  }, [isRunning, speed, selectedFarm, simulationData, weatherForecast])
 
   const loadFarms = async () => {
     try {
@@ -288,27 +427,192 @@ export default function SimulationView() {
       const status = response.data.status
       const farm = response.data.farm
       
+      // Store dashboard data for average soil moisture calculation
+      setDashboardData(response.data)
+      
+      // Use average soil moisture from dashboard (calculated from sensors) or fallback
+      const initialSoilMoisture = response.data.average_soil_moisture !== null && response.data.average_soil_moisture !== undefined
+        ? parseFloat(response.data.average_soil_moisture)
+        : parseFloat(status?.current_soil_moisture || 50)
+      
       setSimulationData({
         batteryLevel: parseFloat(status?.battery_level || 70),
         batteryCapacity: parseFloat(farm?.battery_capacity_kwh || 1320),
         systemSizeKw: parseFloat(farm?.system_size_kw || 130),
         panelEfficiency: parseFloat(farm?.panel_efficiency || 0.18),
-        soilMoisture: parseFloat(status?.current_soil_moisture || 50),
+        soilMoisture: initialSoilMoisture,
         lastIrrigationOn: status?.irrigation_on || false,
       })
       
-      // Initialize with current data
+      // Fetch weather forecast from Open-Meteo
+      let forecast = null
+      try {
+        const weatherResponse = await automationAPI.getWeatherForecast(selectedFarm.id)
+        console.log('Weather forecast response:', weatherResponse.data)
+        
+        if (weatherResponse.data && weatherResponse.data.forecast) {
+          forecast = weatherResponse.data.forecast
+          
+          // Debug: Check if GTI and soil data is present
+          if (forecast.hourly && forecast.hourly.global_tilted_irradiance) {
+            const gtiValues = forecast.hourly.global_tilted_irradiance
+            console.log(`Loaded GTI forecast: ${gtiValues.length} hours, first 5 values:`, gtiValues.slice(0, 5))
+            console.log('First forecast time:', forecast.hourly.time?.[0])
+          } else {
+            console.warn('Warning: GTI data not found in forecast response')
+            console.log('Available hourly keys:', forecast.hourly ? Object.keys(forecast.hourly) : 'No hourly data')
+          }
+          
+          // Debug: Check if soil data is present
+          if (forecast.hourly) {
+            const hasSoilMoisture = forecast.hourly.soil_moisture_0_1cm || 
+                                   forecast.hourly.soil_moisture_1_3cm || 
+                                   forecast.hourly.soil_moisture_3_9cm
+            const hasSoilTemp = forecast.hourly.soil_temperature_6cm
+            
+            if (hasSoilMoisture) {
+              const soilMoisture0 = forecast.hourly.soil_moisture_0_1cm?.[0]
+              const soilMoisture1 = forecast.hourly.soil_moisture_1_3cm?.[0]
+              const soilMoisture3 = forecast.hourly.soil_moisture_3_9cm?.[0]
+              console.log(`Loaded Soil Moisture data - 0-1cm: ${soilMoisture0}, 1-3cm: ${soilMoisture1}, 3-9cm: ${soilMoisture3}`)
+            } else {
+              console.warn('Warning: Soil moisture data not found in forecast response')
+            }
+            
+            if (hasSoilTemp) {
+              const soilTemp = forecast.hourly.soil_temperature_6cm?.[0]
+              console.log(`Loaded Soil Temperature (6cm): ${soilTemp}°C`)
+            } else {
+              console.warn('Warning: Soil temperature data not found in forecast response')
+            }
+          }
+          
+          setWeatherForecast(forecast)
+        } else {
+          console.warn('No forecast data in response')
+        }
+      } catch (weatherError) {
+        console.error('Error loading weather forecast, using simulated data:', weatherError)
+        setWeatherForecast(null)
+      }
+      
+      // Set simulation start time to current time
+      const startTime = new Date()
+      setSimulationStartTime(startTime)
+      
+      // Initialize with current data (use same initialSoilMoisture calculated above)
       const initial = simulateHour({
         batteryLevel: parseFloat(status?.battery_level || 70),
         batteryCapacity: parseFloat(farm?.battery_capacity_kwh || 1320),
         systemSizeKw: parseFloat(farm?.system_size_kw || 130),
         panelEfficiency: parseFloat(farm?.panel_efficiency || 0.18),
-        soilMoisture: parseFloat(status?.current_soil_moisture || 50),
+        soilMoisture: initialSoilMoisture,
         lastIrrigationOn: status?.irrigation_on || false,
-      }, 0)
+      }, 0, forecast, startTime)
       setHistory([initial])
     } catch (error) {
       console.error('Error loading farm data:', error)
+    }
+  }
+
+  // Generate random sensor readings based on current simulation state
+  const generateSensorReadings = (currentState, sensorsList = sensors) => {
+    if (!sensorsList || sensorsList.length === 0) return sensorsList || []
+    
+    const updatedSensors = sensorsList.map(sensor => {
+      const sensorName = sensor.sensor_type?.name?.toLowerCase() || ''
+      
+      // Generate random reading based on sensor type and current simulation state
+      let randomValue = 0
+      
+      if (sensorName.includes('soil moisture')) {
+        // Use Open-Meteo soil moisture as base if available, otherwise use simulated
+        // Note: Open-Meteo provides shallow depths (0-9cm), but we display 300cm depth
+        // We'll use the Open-Meteo data as a reference point with variations
+        const baseMoisture = currentState?.soilMoisture || 50
+        const variation = sensor.location?.includes('Plot B') ? 3 : sensor.location?.includes('Plot C') ? -2 : 0
+        // Add small random variation to simulate different plot conditions
+        randomValue = Math.max(20, Math.min(85, baseMoisture + variation + (Math.random() * 4 - 2)))
+      } else if (sensorName.includes('soil temperature')) {
+        // Use Open-Meteo soil temperature if available (at 6cm depth)
+        let baseTemp
+        if (currentState?.soilTemperature !== null && currentState?.soilTemperature !== undefined) {
+          baseTemp = currentState.soilTemperature
+        } else {
+          // Fallback: soil temp follows air temp but is cooler
+          baseTemp = (currentState?.temperature || 20) - 2
+        }
+        const variation = sensor.location?.includes('Plot B') ? 1 : sensor.location?.includes('Plot C') ? -1 : 0
+        randomValue = baseTemp + variation + (Math.random() * 2 - 1)
+      } else if (sensorName.includes('soil electrical conductivity') || sensorName.includes('soil ec')) {
+        randomValue = 0.1 + Math.random() * 2.4
+      } else if (sensorName.includes('water quality') || sensorName.includes('salinity')) {
+        randomValue = 200 + Math.random() * 600
+      } else if (sensorName.includes('water flow')) {
+        // Water flow is active only when irrigation is on
+        if (currentState?.irrigationOn) {
+          randomValue = sensor.location?.includes('main line') 
+            ? 50 + Math.random() * 50 
+            : 20 + Math.random() * 30
+        } else {
+          randomValue = 0
+        }
+      } else if (sensorName.includes('air temperature')) {
+        randomValue = (currentState?.temperature || 20) + (Math.random() * 2 - 1)
+      } else if (sensorName.includes('air humidity')) {
+        // Humidity varies inversely with temperature and increases with rain
+        const baseHumidity = 60 - ((currentState?.temperature || 20) - 20) * 1.5
+        const rainBonus = (currentState?.rain || 0) > 0.5 ? 15 : 0
+        randomValue = Math.max(30, Math.min(95, baseHumidity + rainBonus + (Math.random() * 10 - 5)))
+      } else if (sensorName.includes('rain gauge')) {
+        randomValue = currentState?.rain || 0
+      } else if (sensorName.includes('solar irradiance')) {
+        // Solar irradiance matches GTI from weather
+        randomValue = (currentState?.gti || 0) + (Math.random() * 50 - 25)
+        randomValue = Math.max(0, randomValue)
+      } else if (sensorName.includes('photosynthetic active radiation') || sensorName.includes('par')) {
+        // PAR is related to solar irradiance
+        const basePAR = ((currentState?.gti || 0) / 1000) * 1800
+        randomValue = Math.max(0, basePAR + (Math.random() * 200 - 100))
+      }
+      
+      return {
+        ...sensor,
+        latest_reading: {
+          value: parseFloat(randomValue.toFixed(2)),
+          timestamp: new Date().toISOString()
+        }
+      }
+    })
+    
+    return updatedSensors
+  }
+
+  const loadSensors = async () => {
+    if (!selectedFarm) return
+    
+    try {
+      const response = await farmerAPI.getSensors(selectedFarm.id)
+      const loadedSensors = response.data || []
+      
+      // Always generate random readings for sensors (even if no simulation data yet)
+      const current = history[history.length - 1] || {}
+      const currentState = {
+        soilMoisture: current.soilMoisture || 50,
+        temperature: current.temperature || 20,
+        rain: current.rain || 0,
+        irrigationOn: current.irrigationOn || false,
+        gti: current.gti || 0
+      }
+      
+      if (loadedSensors.length > 0) {
+        const sensorsWithReadings = generateSensorReadings(currentState, loadedSensors)
+        setSensors(sensorsWithReadings)
+      } else {
+        setSensors(loadedSensors)
+      }
+    } catch (error) {
+      console.error('Error loading sensors:', error)
     }
   }
 
@@ -316,7 +620,13 @@ export default function SimulationView() {
     if (!simulationData) return
     
     const newHour = currentHour + 1
-    const newData = simulateHour(simulationData, newHour)
+    const newData = simulateHour(simulationData, newHour, weatherForecast, simulationStartTime)
+    
+    // Generate random sensor readings based on current simulation state
+    if (sensors && sensors.length > 0) {
+      const updatedSensors = generateSensorReadings(newData, sensors)
+      setSensors(updatedSensors)
+    }
     
     // Update simulation data with new battery level, soil moisture, and irrigation state
     setSimulationData(prev => ({
@@ -342,6 +652,7 @@ export default function SimulationView() {
     setIsRunning(false)
     setCurrentHour(0)
     setHistory([])
+    setSimulationStartTime(new Date())
     loadFarmData()
   }
 
@@ -352,18 +663,59 @@ export default function SimulationView() {
 
   const current = history[history.length - 1] || {}
 
+  // Calculate average soil moisture from sensors at 300cm depth
+  const calculateAverageSoilMoisture = () => {
+    // First try to get from dashboard data (most accurate, calculated server-side)
+    if (dashboardData?.average_soil_moisture !== null && dashboardData?.average_soil_moisture !== undefined) {
+      return parseFloat(dashboardData.average_soil_moisture)
+    }
+    
+    // Fallback: Calculate from loaded sensors
+    if (sensors && sensors.length > 0) {
+      // Filter for soil moisture sensors at 300cm depth
+      const soilMoistureSensors = sensors.filter(sensor => 
+        sensor.sensor_type?.name?.toLowerCase().includes('soil moisture') &&
+        sensor.location?.includes('300cm') &&
+        sensor.is_active
+      )
+      
+      if (soilMoistureSensors.length > 0) {
+        // Get readings from each sensor
+        const readings = soilMoistureSensors
+          .map(sensor => {
+            if (sensor.latest_reading && sensor.latest_reading.value !== null && sensor.latest_reading.value !== undefined) {
+              return parseFloat(sensor.latest_reading.value)
+            }
+            return null
+          })
+          .filter(val => val !== null && !isNaN(val))
+        
+        if (readings.length > 0) {
+          // Calculate average
+          const average = readings.reduce((sum, val) => sum + val, 0) / readings.length
+          return average
+        }
+      }
+    }
+    
+    // Final fallback: use simulated value
+    return current.soilMoisture || null
+  }
+
+  const averageSoilMoisture = calculateAverageSoilMoisture()
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
+    <div className="min-h-screen bg-gradient-to-br from-green-50 to-emerald-100">
       {/* Header */}
-      <header className="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-50">
+      <header className="bg-green-600 border-b border-green-700 shadow-sm sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-gradient-to-br from-climexa-primary to-climexa-accent rounded-lg flex items-center justify-center shadow-sm">
               <Activity className="w-6 h-6 text-white" />
             </div>
             <div>
-              <h1 className="text-xl font-semibold text-gray-900">System Simulation</h1>
-              <p className="text-xs text-gray-500">Real-time farm system monitoring</p>
+              <h1 className="text-xl font-semibold text-white">System Simulation</h1>
+              <p className="text-xs text-green-100">Real-time farm system monitoring</p>
             </div>
           </div>
           <div className="flex items-center gap-4">
@@ -374,7 +726,7 @@ export default function SimulationView() {
                   const farm = farms.find(f => f.id === parseInt(e.target.value))
                   setSelectedFarm(farm)
                 }}
-                className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-50 rounded-lg transition-colors border border-gray-300 bg-white"
+                className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 hover:bg-green-50 rounded-lg transition-colors border border-green-700 bg-white"
               >
                 {farms.map(farm => (
                   <option key={farm.id} value={farm.id}>{farm.name}</option>
@@ -383,13 +735,13 @@ export default function SimulationView() {
             )}
             <button
               onClick={() => navigate('/farmer')}
-              className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-50 rounded-lg transition-colors border border-gray-300"
+              className="px-4 py-2 text-sm font-medium text-white hover:text-green-100 hover:bg-green-700 rounded-lg transition-colors border border-green-500"
             >
               Dashboard
             </button>
             <button
               onClick={handleLogout}
-              className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-50 rounded-lg transition-colors border border-gray-300"
+              className="px-4 py-2 text-sm font-medium text-white hover:text-green-100 hover:bg-green-700 rounded-lg transition-colors border border-green-500"
             >
               Logout
             </button>
@@ -413,10 +765,23 @@ export default function SimulationView() {
                   </div>
                 )}
               </div>
+              <div className="space-y-1">
               <p className="text-sm text-gray-500">
                 {selectedFarm?.name || 'No farm selected'} • Simulating hour {currentHour}
-                {current.hourOfDay !== undefined && ` • ${current.hourOfDay}:00 (Day ${Math.floor(currentHour / 24) + 1})`}
-              </p>
+                  {current.hourOfDay !== undefined && ` • ${String(current.hourOfDay).padStart(2, '0')}:00 (Day ${Math.floor(currentHour / 24) + 1})`}
+                </p>
+                {simulationStartTime && (
+                  <div className="text-xs text-gray-400">
+                    <span className="font-medium">Start:</span> {simulationStartTime.toLocaleString()}
+                    {current.timestamp && (
+                      <>
+                        {' • '}
+                        <span className="font-medium">Simulated:</span> {new Date(current.timestamp).toLocaleString()}
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
             <div className="flex items-center gap-3">
               <div className="flex items-center gap-2 bg-gray-100 rounded-lg p-2">
@@ -602,23 +967,131 @@ export default function SimulationView() {
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Soil Moisture</h3>
                   <Gauge className={`w-5 h-5 ${
-                    current.soilMoisture < 30 ? 'text-red-500' :
-                    current.soilMoisture < 50 ? 'text-yellow-500' :
+                    (current.soilMoisture ?? 0) < 30 ? 'text-red-500' :
+                    (current.soilMoisture ?? 0) < 50 ? 'text-yellow-500' :
                     'text-green-500'
                   }`} />
                 </div>
                 <div className={`text-3xl font-bold ${
-                  current.soilMoisture < 30 ? 'text-red-600' :
-                  current.soilMoisture < 50 ? 'text-yellow-600' :
+                  (current.soilMoisture ?? 0) < 30 ? 'text-red-600' :
+                  (current.soilMoisture ?? 0) < 50 ? 'text-yellow-600' :
                   'text-green-600'
                 }`}>
                   {current.soilMoisture?.toFixed(1) || 'N/A'}%
                 </div>
                 <p className="text-xs text-gray-500 mt-1">
-                  {current.soilMoisture < 30 ? 'Critical' : current.soilMoisture < 50 ? 'Low' : 'Optimal'}
+                  {weatherForecast && weatherForecast.hourly && (weatherForecast.hourly.soil_moisture_3_9cm || weatherForecast.hourly.soil_moisture_1_3cm || weatherForecast.hourly.soil_moisture_0_1cm)
+                    ? 'From Open-Meteo'
+                    : 'Simulated'}
+                  {' • '}
+                  {(current.soilMoisture ?? 0) < 30 ? 'Critical' : 
+                   (current.soilMoisture ?? 0) < 50 ? 'Low' : 
+                   'Optimal'}
                 </p>
               </div>
             </div>
+
+            {/* Sensor Network Display */}
+            {sensors.length > 0 && (
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 mb-8">
+                <h3 className="text-xl font-semibold text-gray-900 mb-6">Sensor Network ({sensors.length} sensors)</h3>
+                
+                {['soil', 'water', 'weather', 'solar'].map(category => {
+                  const categorySensors = sensors.filter(s => s.sensor_type?.category === category)
+                  if (categorySensors.length === 0) return null
+                  
+                  const categoryLabels = {
+                    soil: 'Soil Sensors',
+                    water: 'Water Sensors',
+                    weather: 'Weather Sensors',
+                    solar: 'Solar Sensors'
+                  }
+                  
+                  const categoryColors = {
+                    soil: 'bg-amber-50 border-amber-200',
+                    water: 'bg-blue-50 border-blue-200',
+                    weather: 'bg-cyan-50 border-cyan-200',
+                    solar: 'bg-yellow-50 border-yellow-200'
+                  }
+                  
+                  return (
+                    <div key={category} className={`mb-6 rounded-lg border-2 ${categoryColors[category]} p-4`}>
+                      <h4 className="text-lg font-semibold text-gray-800 mb-4">{categoryLabels[category]}</h4>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {categorySensors.map(sensor => {
+                          const getSensorIcon = () => {
+                            const sensorName = sensor.sensor_type?.name?.toLowerCase() || ''
+                            if (sensorName.includes('moisture')) return <Gauge className="w-5 h-5 text-amber-600" />
+                            if (sensorName.includes('temperature')) return <Thermometer className="w-5 h-5 text-red-500" />
+                            if (sensorName.includes('conductivity') || sensorName.includes('ec')) return <GaugeCircle className="w-5 h-5 text-purple-500" />
+                            if (sensorName.includes('flow')) return <Waves className="w-5 h-5 text-blue-500" />
+                            if (sensorName.includes('quality') || sensorName.includes('salinity')) return <Droplets className="w-5 h-5 text-cyan-500" />
+                            if (sensorName.includes('humidity')) return <Droplet className="w-5 h-5 text-blue-400" />
+                            if (sensorName.includes('rain')) return <Cloud className="w-5 h-5 text-gray-500" />
+                            if (sensorName.includes('irradiance') || sensorName.includes('radiation') || sensorName.includes('par')) return <Sun className="w-5 h-5 text-yellow-500" />
+                            return <Activity className="w-5 h-5 text-gray-400" />
+                          }
+                          
+                          return (
+                            <div 
+                              key={sensor.id} 
+                              className="bg-white rounded-lg border border-gray-200 p-4 hover:shadow-md transition-shadow"
+                            >
+                              <div className="flex items-start justify-between mb-2">
+                                <div className="flex items-start gap-2 flex-1">
+                                  <div className="mt-0.5">
+                                    {getSensorIcon()}
+                                  </div>
+                                  <div className="flex-1">
+                                    <h5 className="text-sm font-semibold text-gray-900 mb-1">
+                                      {sensor.name}
+                                    </h5>
+                                    {sensor.location && (
+                                      <p className="text-xs text-gray-500 mb-2">{sensor.location}</p>
+                                    )}
+                                  </div>
+                                </div>
+                                <span className={`px-2 py-1 text-xs rounded-full ${
+                                  sensor.is_active 
+                                    ? 'bg-green-100 text-green-700' 
+                                    : 'bg-gray-100 text-gray-600'
+                                }`}>
+                                  {sensor.is_active ? 'Active' : 'Inactive'}
+                                </span>
+                              </div>
+                              <div className="mt-3 pt-3 border-t border-gray-100">
+                                {sensor.latest_reading ? (
+                                  <div>
+                                    <div className="flex items-baseline gap-2">
+                                      <span className="text-2xl font-bold text-gray-900">
+                                        {typeof sensor.latest_reading.value === 'number' 
+                                          ? sensor.latest_reading.value.toFixed(2)
+                                          : parseFloat(sensor.latest_reading.value || 0).toFixed(2)
+                                        }
+                                      </span>
+                                      <span className="text-sm text-gray-500">
+                                        {sensor.sensor_type?.unit || ''}
+                                      </span>
+                                    </div>
+                                    <p className="text-xs text-gray-400 mt-1">
+                                      {new Date(sensor.latest_reading.timestamp).toLocaleString()}
+                                    </p>
+                                  </div>
+                                ) : (
+                                  <div className="text-sm text-gray-400 italic">
+                                    No readings available
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
 
             {/* Real-time Graph */}
             {history.length > 0 && (
